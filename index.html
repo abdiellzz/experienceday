@@ -430,6 +430,11 @@ main{max-width:1320px}
 .template-output{flex:1;min-height:535px;max-height:740px;overflow-y:auto;padding:32px 36px;box-sizing:border-box;font-family:ForensicMono,ui-monospace,monospace;font-size:19px;line-height:1.7;color:#d9dde3;scrollbar-color:#4b515b #0d0f12}
 .template-screen{white-space:pre-wrap;overflow-wrap:anywhere;color:#d9dde3}.template-history{white-space:pre-wrap;overflow-wrap:anywhere;color:#d9dde3}.template-history:not(:empty){margin-top:18px}.template-history .terminal-line{margin:5px 0}.template-history .terminal-line.cmd{color:#d9dde3}.template-history .terminal-line.info{color:#a3aab5}.template-history .terminal-line.error{color:#f4a9a6}
 .template-prompt{display:flex;align-items:baseline;gap:10px;margin:7px 0 0}.template-chevron{color:#7d8591;flex:none}.template-prompt #terminalInput{min-width:0;flex:1;width:100%;padding:0;border:0;border-radius:0;outline:0;background:transparent;color:#d9dde3;box-shadow:none;caret-color:#d9dde3;font:inherit;line-height:inherit}.template-prompt #terminalInput::placeholder{font:inherit;color:#626a76;opacity:.75}.template-prompt #terminalInput:focus-visible{outline:0}.template-prompt #terminalInput:disabled{opacity:.6}
+.template-prompt.invalid .template-chevron{color:#f4a9a6}
+.template-prompt.invalid #terminalInput{color:#f4a9a6}
+.template-prompt.invalid{animation:promptNudge .3s ease}
+@keyframes promptNudge{0%,100%{transform:translateX(0)}25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
+@media(prefers-reduced-motion:reduce){.template-prompt.invalid{animation:none}}
 @media(max-width:750px){.template-canvas{padding:22px}.template-terminal{min-height:500px}.template-output{min-height:448px;padding:25px;font-size:16px}}
 @media(max-width:480px){.template-canvas{padding:12px}.template-terminal{min-height:430px}.template-output{min-height:378px;padding:20px 15px;font-size:14px;line-height:1.7}.template-toolbar{padding:0 15px}.template-title{margin-left:8px}.template-prompt #terminalInput{font-size:16px}}
 
@@ -624,6 +629,9 @@ function renderCommandGuide(){
 }
 function terminalLog(type,text){let history=$('#terminalHistory');if(type==='cmd')history.replaceChildren();let row=document.createElement('div');row.className='terminal-line '+type;row.textContent=(type==='cmd'?'> ':'COOPER > ')+text;history.append(row);$('#terminalOutput').scrollTop=0}
 function showResponse(text,isError=false){terminalLog(isError?'error':'info',text);$('#feedback').textContent='';if(isError)beep(260,.14)}
+/* Comando incorrecto: se muestra el aviso y lo escrito por el usuario se queda en la línea de comandos. */
+let keepPrompt=null;
+function showWrong(text){showResponse(text,true);keepPrompt=true}
 function stageHelp(){return [
  'escanear — examina el celular y busca archivos.',
  'abrir NOMBRE — revisa el archivo cuyo nombre escribas; volver — muestra de nuevo la lista.',
@@ -672,45 +680,46 @@ function submitCommand(raw){
  if(val==='historial'){showResponse(commandHistory.slice(-6).join('  |  '));return}
  if(stage===0){
   if(val==='escanear'){startAmbient();beep();animateProgress('EXAMINANDO DISPOSITIVO','> CONECTANDO A LA COPIA...\n> BUSCANDO ARCHIVOS...\n> ANALIZANDO REGISTROS...',()=>{beep(840);setStage(1,true)})}
-  else showResponse('Para comenzar, escribe escanear.',true);return;
+  else showWrong('Para comenzar, escribe escanear.');return;
  }
  if(stage===1){
   if(['volver','listar','ls','atras','atrás'].includes(val)){render();showResponse('Lista de archivos. Escribe abrir seguido del nombre que quieras examinar.');return}
   let parts=val.split(' '),verb=parts[0],name=parts.slice(1).join(' ');
   if(['abrir','leer','cat','inspeccionar'].includes(verb)){
-   if(!name){showResponse('Escribe abrir, un espacio y el nombre de un archivo de la lista.',true);return}
-   if(!Object.hasOwn(files,name)){showResponse('No se encontró ese archivo. Escribe volver y revisa el nombre exacto.',true);return}
+   if(!name){showWrong('Escribe abrir, un espacio y el nombre de un archivo de la lista.');return}
+   if(!Object.hasOwn(files,name)){showWrong('No se encontró ese archivo. Escribe volver y revisa el nombre exacto.');return}
    if(name==='archivo_03.dat'){showResponse('Se encontró un registro eliminado.');beep(790);setStage(2)}else showDiscarded(name);return;
   }
-  showResponse('Escribe abrir y el nombre de un archivo, o volver para ver la lista.',true);return;
+  showWrong('Escribe abrir y el nombre de un archivo, o volver para ver la lista.');return;
  }
  if(stage===2){
   if(['volver','listar','ls','atras','atrás'].includes(val)){setStage(1);showResponse('Lista de archivos. Puedes examinar otra opción.');return}
   if(val==='recuperar'||val==='recuperar archivo_03.dat'){beep(740);animateProgress('RECUPERANDO REGISTRO','> LEYENDO LA CONVERSACIÓN...\n> BUSCANDO EL REGISTRO ELIMINADO...\n> RECONSTRUYENDO EL MENSAJE...',()=>{beep(840);setStage(3)})}
-  else showResponse('Para intentar leer el registro encontrado, escribe recuperar.',true);return;
+  else showWrong('Para intentar leer el registro encontrado, escribe recuperar.');return;
  }
  if(stage===3){
   let answer=val.startsWith('descifrar ')?val.slice('descifrar '.length).trim():val;
   if(answer.toUpperCase()===decryptCaesar('YXHOR',3)){
    beep(800);animateProgress('DESCIFRANDO PALABRA','> CIFRADO CÉSAR DETECTADO...\n> APLICANDO DESPLAZAMIENTO INVERSO...\n> VERIFICANDO EL MENSAJE...',()=>{beginRewardCountdown()});
-  }else if(val==='descifrar')showResponse('Escribe descifrar, un espacio y la palabra que descubriste.',true);
-  else if(answer.toLowerCase()==='vueso')showResponse('Revisa la cuarta posición y cuenta tres letras hacia atrás en el abecedario.',true);
-  else showResponse('La palabra no coincide. Retrocede 3 letras desde cada símbolo e inténtalo de nuevo.',true);
+  }else if(val==='descifrar')showWrong('Escribe descifrar, un espacio y la palabra que descubriste.');
+  else if(answer.toLowerCase()==='vueso')showWrong('Revisa la cuarta posición y cuenta tres letras hacia atrás en el abecedario.');
+  else showWrong('La palabra no coincide. Retrocede 3 letras desde cada símbolo e inténtalo de nuevo.');
   return;
  }
  showResponse('Misión completada. Para comenzar de nuevo, pulsa Reiniciar misión.');
 }
 function celebrate(){if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;const c=$('#confetti');c.replaceChildren();for(let i=0;i<38;i++){let p=document.createElement('span');p.className='particle';p.style.left=Math.random()*100+'%';p.style.width=(4+Math.random()*6)+'px';p.style.height=(7+Math.random()*8)+'px';p.style.background=['#62b6ff','#ffffff','#9dc8ee','#ffd18a'][i%4];p.style.setProperty('--drift',(Math.random()*240-120)+'px');p.style.animationDelay=(Math.random()*.4)+'s';c.append(p)}setTimeout(()=>c.replaceChildren(),3000)}
-$('#terminalForm').onsubmit=e=>{e.preventDefault();let input=$('#terminalInput'),value=input.value;input.value='';submitCommand(value);input.focus()};
+$('#terminalForm').onsubmit=e=>{e.preventDefault();let form=e.currentTarget,input=$('#terminalInput'),value=input.value;form.classList.remove('invalid');keepPrompt=null;submitCommand(value);if(keepPrompt){form.classList.add('invalid');input.value=value;input.setSelectionRange(value.length,value.length)}else{input.value=''}keepPrompt=null;input.focus()};
 $('#terminalInput').onkeydown=e=>{
+ if(e.key==='Escape'){e.preventDefault();e.currentTarget.value='';$('#terminalForm').classList.remove('invalid');return}
  if(e.key==='ArrowUp'&&commandHistory.length){e.preventDefault();historyIndex=Math.max(0,historyIndex-1);e.currentTarget.value=commandHistory[historyIndex]}
  else if(e.key==='ArrowDown'&&commandHistory.length){e.preventDefault();historyIndex=Math.min(commandHistory.length,historyIndex+1);e.currentTarget.value=commandHistory[historyIndex]||''}
  else if(e.key==='Tab'){let current=e.currentTarget.value.toLowerCase(),options=['ayuda','pista','limpiar','historial',...([['escanear'],['volver','abrir archivo_01.jpg','abrir archivo_02.txt','abrir archivo_03.dat'],['recuperar','volver'],['descifrar '],[]][stage])],matches=options.filter(x=>current&&x.startsWith(current));if(matches.length===1){e.preventDefault();e.currentTarget.value=matches[0]}}
 };
 $('#urgentCase').onclick=()=>{startAmbient();beep(760,.12);$('#caseDashboard').hidden=true;$('#missionContent').hidden=false;window.scrollTo({top:0,behavior:'smooth'});};
 document.querySelectorAll('.waiting-case').forEach(b=>b.onclick=()=>{$('#caseFeedback').textContent='El caso «'+b.dataset.case+'» está en espera. La prioridad ahora es Mensaje fantasma.';beep(350,.08)});
-$('#backCases').onclick=()=>{clearTimers();rewardReady=false;commandHistory=[];historyIndex=0;discardedFiles.clear();$('#terminalHistory').replaceChildren();setStage(0);$('#missionContent').hidden=true;$('#caseDashboard').hidden=false;$('#caseFeedback').textContent='';window.scrollTo({top:0,behavior:'smooth'})};
-$('#reset').onclick=()=>{clearTimers();rewardReady=false;commandHistory=[];historyIndex=0;discardedFiles.clear();$('#terminalHistory').replaceChildren();$('#confetti').replaceChildren();setStage(0)};
+$('#backCases').onclick=()=>{clearTimers();rewardReady=false;commandHistory=[];historyIndex=0;discardedFiles.clear();$('#terminalHistory').replaceChildren();$('#terminalInput').value='';$('#terminalForm').classList.remove('invalid');setStage(0);$('#missionContent').hidden=true;$('#caseDashboard').hidden=false;$('#caseFeedback').textContent='';window.scrollTo({top:0,behavior:'smooth'})};
+$('#reset').onclick=()=>{clearTimers();rewardReady=false;commandHistory=[];historyIndex=0;discardedFiles.clear();$('#terminalHistory').replaceChildren();$('#terminalInput').value='';$('#terminalForm').classList.remove('invalid');setStage(0);$('#confetti').replaceChildren();setStage(0)};
 render();
 
 /* Visualización animada local; los recorridos y contadores son de práctica. */

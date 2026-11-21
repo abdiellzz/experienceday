@@ -564,13 +564,12 @@ try {
  if (saved && typeof saved === 'object') mix = Object.assign(mix, saved);
 } catch (e) {}
 let audio = null, master = null, reverb = null, engineStarted = false;
-let musicGain = null, fxGain = null, droneGain = null, hissGainNode = null;
+let musicGain = null, fxGain = null, droneGain = null;
 let seqTimer = null, textureTimer = null, nextNoteTime = 0, musicStep = 0, musicBar = 0;
 let levelTimer = null, levelBars = [];
 const STEP = 0.625;            /* duración de cada paso del secuenciador */
 const LOOKAHEAD = 2.4;         /* segundos programados por delante */
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-const noiseBufferCache = new WeakMap();
 
 function saveMix(){
  try { localStorage.setItem(SOUND_KEY, soundOn ? 'on' : 'off'); localStorage.setItem(MIX_KEY, JSON.stringify(mix)); } catch (e) {}
@@ -615,19 +614,6 @@ function impulse(seconds, decay){
  }
  return buf;
 }
-function noiseBuffer(){
- const ctx = audio;
- if(noiseBufferCache.has(ctx)) return noiseBufferCache.get(ctx);
- const len = Math.floor(ctx.sampleRate * 2), buf = ctx.createBuffer(1, len, ctx.sampleRate), data = buf.getChannelData(0);
- for(let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
- noiseBufferCache.set(ctx, buf);
- return buf;
-}
-function noiseSource(){
- const src = audio.createBufferSource();
- src.buffer = noiseBuffer(); src.loop = true;
- return src;
-}
 function ready(){ return soundOn && !!audioCtx() && audio.state === 'running'; }
 
 /* Arranca el motor de sonido. Debe llamarse desde un gesto del usuario. */
@@ -661,13 +647,13 @@ function stopAmbient(){
 
 /* --- Música: colchón continuo + arpegio en Re menor (tensión cinematográfica) --- */
 function buildMusic(){
- const drone = audio.createGain(); drone.gain.value = .22; drone.connect(musicGain);
+ const drone = audio.createGain(); drone.gain.value = .26; drone.connect(musicGain);
  droneGain = drone;
  const droneFilter = audio.createBiquadFilter();
  droneFilter.type = 'lowpass'; droneFilter.frequency.value = 380; droneFilter.Q.value = .8;
  droneFilter.connect(drone);
  /* tres voces de drone + una quinta alta: nunca se queda en silencio */
- [[73.42, .55, 'sine'], [110, .3, 'triangle'], [146.83, .16, 'sine'], [220, .07, 'triangle']].forEach(([f, level, type]) => {
+ [[73.42, .58, 'sine'], [110, .32, 'triangle'], [146.83, .17, 'sine'], [220, .08, 'triangle'], [293.66, .035, 'sine']].forEach(([f, level, type]) => {
   const osc = audio.createOscillator(), g = audio.createGain();
   osc.type = type; osc.frequency.value = f; g.gain.value = level;
   osc.connect(g).connect(droneFilter); osc.start();
@@ -675,11 +661,7 @@ function buildMusic(){
   slow.frequency.value = .03 + Math.random() * .05; depth.gain.value = level * .35;
   slow.connect(depth).connect(g.gain); slow.start();
  });
- /* capa de aire filtrado: rellena el espacio entre notas */
- const hiss = noiseSource(), hissFilter = audio.createBiquadFilter(), hissGain = audio.createGain();
- hissFilter.type = 'bandpass'; hissFilter.frequency.value = 1500; hissFilter.Q.value = .5;
- hissGain.gain.value = .03; hissGainNode = hissGain;
- hiss.connect(hissFilter).connect(hissGain).connect(musicGain); hiss.start();
+ /* sin capas de ruido: solo tonos, para que no suene a lluvia ni a estática */
 }
 function scheduleStep(t, step){
  if(!ready()) return;
@@ -737,17 +719,21 @@ function buildTexture(){
   if(mix.notis && tick % 3 === 0) dataBlip();
  }, 1250);
 }
+/* Clic de tecla sintético (un golpe corto, no ruido continuo). */
 function keyClack(gain = .5, freq = 0){
  if(!ready()) return;
- const t = audio.currentTime, src = audio.createBufferSource(), bp = audio.createBiquadFilter(), g = audio.createGain(), pan = audio.createStereoPanner();
- src.buffer = noiseBuffer(); src.playbackRate.value = 1.8 + Math.random();
- bp.type = 'bandpass'; bp.frequency.value = freq || (1800 + Math.random() * 2200); bp.Q.value = 1.4;
+ const t = audio.currentTime, osc = audio.createOscillator(), g = audio.createGain(), pan = audio.createStereoPanner(), bp = audio.createBiquadFilter();
+ const base = freq || (900 + Math.random() * 700);
+ osc.type = 'square'; osc.frequency.setValueAtTime(base, t);
+ osc.frequency.exponentialRampToValueAtTime(base * .55, t + .03);
+ bp.type = 'bandpass'; bp.frequency.value = base * 1.6; bp.Q.value = 2.2;
  pan.pan.value = Math.random() * 1.4 - .7;
- const dur = .026 + Math.random() * .022;
- g.gain.setValueAtTime(.0001, t); g.gain.linearRampToValueAtTime(.05 * gain, t + .003);
+ const dur = .028 + Math.random() * .018;
+ g.gain.setValueAtTime(.0001, t);
+ g.gain.linearRampToValueAtTime(.032 * gain, t + .002);
  g.gain.exponentialRampToValueAtTime(.0001, t + dur);
- src.connect(bp).connect(g).connect(pan).connect(fxGain);
- src.start(t); src.stop(t + dur + .02);
+ osc.connect(bp).connect(g).connect(pan).connect(fxGain);
+ osc.start(t); osc.stop(t + dur + .02);
 }
 function typingBurst(){
  if(!ready()) return;
@@ -783,15 +769,21 @@ function beep(freq = 680, duration = .1){
  o.connect(g); g.connect(fxGain); g.connect(reverb);
  o.start(t); o.stop(t + duration + .02);
 }
+/* Barrido tonal (sin ruido): suena a escáner, no a lluvia ni a viento. */
 function whoosh(dur = .5, from = 220, to = 1400){
  if(!ready()) return;
- const t = audio.currentTime, src = noiseSource(), bp = audio.createBiquadFilter(), g = audio.createGain();
- bp.type = 'bandpass'; bp.Q.value = 1.2;
- bp.frequency.setValueAtTime(from, t); bp.frequency.exponentialRampToValueAtTime(to, t + dur);
- g.gain.setValueAtTime(.0001, t); g.gain.linearRampToValueAtTime(.05, t + dur * .35);
+ const t = audio.currentTime, osc = audio.createOscillator(), lp = audio.createBiquadFilter(), g = audio.createGain();
+ osc.type = 'sawtooth';
+ osc.frequency.setValueAtTime(from, t);
+ osc.frequency.exponentialRampToValueAtTime(to, t + dur);
+ lp.type = 'lowpass'; lp.Q.value = 6;
+ lp.frequency.setValueAtTime(from * 2.2, t);
+ lp.frequency.exponentialRampToValueAtTime(to * 1.6, t + dur);
+ g.gain.setValueAtTime(.0001, t);
+ g.gain.linearRampToValueAtTime(.028, t + dur * .3);
  g.gain.exponentialRampToValueAtTime(.0001, t + dur);
- src.connect(bp).connect(g).connect(fxGain); g.connect(reverb);
- src.start(t); src.stop(t + dur + .05);
+ osc.connect(lp).connect(g).connect(fxGain); g.connect(reverb);
+ osc.start(t); osc.stop(t + dur + .05);
 }
 function glitch(length = .18){
  if(!ready()) return;
